@@ -2,11 +2,33 @@ from fastapi import FastAPI, Query, HTTPException
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+###---
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+DATABASE_URL = 'postgresql://localhost/postgres'
+engine = create_engine(DATABASE_URL)
+
+Session = sessionmaker(bind=engine)
+session = Session()
+
+Base = declarative_base()
+
+
+class NickName_sql(Base):
+    __tablename__ = "nicknames"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+
+
+Base.metadata.create_all(engine)
+###---
 app = FastAPI()
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key='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'
+    api_key='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'
 )
 
 LANGUAGE_NAMES = {
@@ -14,10 +36,8 @@ LANGUAGE_NAMES = {
     "en": "английском"
 }
 
-db = {}
 
-
-class NickName(BaseModel):
+class NickName_pydantic(BaseModel):
     value: str = Field(min_length=3, max_length=20)
 
 
@@ -45,6 +65,7 @@ def generate_nickname(
         - Все никнеймы должны быть разными.
         - Не используй символы, кроме букв и цифр.
         - Не добавляй пояснений, только список никнеймов построчно.
+        - не нумеруй никнеймы.
         - разделяй никнеймы вот таким знаком $
         """
         try:
@@ -59,53 +80,58 @@ def generate_nickname(
             )
         except Exception as e:
             raise HTTPException(status_code=401, detail=f"OpenAI API error: {e}")
-        global db
+
         temporary_db = {}
         counter_temporary_db = 0
         clean = completion.choices[0].message.content.replace("**", "").replace("\n", "")
-        for name in clean.split("$"):
-            if len(name.strip()) > 0:
-                db[len(db)] = name
-                temporary_db[counter_temporary_db] = name
+        for names in clean.split("$"):
+            if len(names.strip()) > 0:
+                session.add(NickName_sql(name=names))
+                session.commit()
+                temporary_db[counter_temporary_db] = names
                 counter_temporary_db += 1
         return {"nicknames": temporary_db}
-
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка в generate_nickname: {e}")
 
 
 @app.post("/nicknames")
-def create_nickname(nickname: NickName):
-    new_id = len(db)
-    db[new_id] = nickname.value
-    return {"id": new_id, "nickname": nickname.value}
+def create_nickname(nickname: NickName_pydantic):
+    new_nickname = NickName_sql(name=nickname.value)
+    session.add(new_nickname)
+    session.commit()
+    return {"id": new_nickname.id, "name": new_nickname.name}
 
 
 @app.get("/nicknames")
 def get_nicknames():
-    if len(db) == 0:
-        raise HTTPException(status_code=404, detail="Словарь пуст!")
-    return db
+    nicknames = session.query(NickName_sql)
+    return [{'id': n.id, 'name': n.name} for n in nicknames]
 
 
 @app.put("/nicknames/{nickname_id}")
-def update_nickname(nickname_id: int, nickname: NickName):
-    if nickname_id not in db:
+def update_nickname(nickname_id: int, nickname: NickName_pydantic):
+    record = session.query(NickName_sql).filter(NickName_sql.id == nickname_id).first()
+
+    if not record:
         raise HTTPException(status_code=404, detail="Никнейм не найден")
-    db[nickname_id] = nickname.value
+
+    record.name = nickname.value
+
+    session.commit()
+
     return {"id": nickname_id, "nickname": nickname.value}
 
 
 @app.delete("/nicknames/{nickname_id}")
 def delete_nickname(nickname_id: int):
-    global db
-    if nickname_id not in db:
-        raise HTTPException(status_code=404, detail="Никнейм не найден")
-    deleted = db.pop(nickname_id)
+    record = session.query(NickName_sql).filter(NickName_sql.id == nickname_id).first()
 
-    new_db = {}
-    for id, value in enumerate(db.values()):
-        new_db[id] = value
-    db = new_db
-    return {"message": f"Никнейм '{deleted}' удалён"}
+    if not record:
+        raise HTTPException(status_code=404, detail="Никнейм не найден")
+
+    session.delete(record)
+    session.commit()
+
+    return {"message": f"Никнейм с id={nickname_id} удалён"}
