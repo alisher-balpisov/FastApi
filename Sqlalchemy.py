@@ -10,7 +10,7 @@ session = Session()
 Base = declarative_base()
 
 
-class Nickname(Base):
+class NickName(Base):
     __tablename__ = "nicknames"
 
     id = Column(Integer, primary_key=True)
@@ -18,8 +18,3 @@ class Nickname(Base):
 
 
 Base.metadata.create_all(engine)
-
-new_user = Nickname(name="Alisher")
-session.add(new_user)
-session.commit()
-
