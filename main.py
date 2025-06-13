@@ -5,11 +5,12 @@ from pydantic import BaseModel, Field
 ###--- sqlalchemy
 from Sqlalchemy import session, NickName
 
-from Generate_nickname import generate_nickname
+from Generate_nickname import generate_nickname, create_nickname
 import asyncio
 from aiogram import Bot, Dispatcher
 from keys import tg_token
 from aiogramClient import router
+import uvicorn
 
 app = FastAPI()
 
@@ -18,6 +19,9 @@ app = FastAPI()
 async def startup_event():
     asyncio.create_task(main_aiogram())
 
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
 
 bot = Bot(token=tg_token)
 dp = Dispatcher()
@@ -46,24 +50,21 @@ async def Generate_nickname(
     counter_temporary_db = 0
     for names in cleaned.split("$"):
         if len(names.strip()) > 0:
-            session.add(NickName(name=names))
             temporary_db[counter_temporary_db] = names
             counter_temporary_db += 1
-    session.commit()
     return {"nicknames": temporary_db}
 
 
 @app.post("/nicknames")
-def create_nickname(nickname: NickNameModel):
-    new_nickname = NickName(name=nickname.value)
-    session.add(new_nickname)
-    session.commit()
-    return {"id": new_nickname.id, "name": new_nickname.name}
+def Create_nickname(nickname: NickNameModel):
+    return create_nickname(nickname, indicator="fastapi")
 
 
 @app.get("/nicknames")
 def get_nicknames():
     nicknames = session.query(NickName)
+    if not nicknames:
+        raise HTTPException(status_code=404, detail="Список пуст")
     return [{'id': n.id, 'name': n.name} for n in nicknames]
 
 
